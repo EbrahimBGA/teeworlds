@@ -143,6 +143,7 @@ public:
 		int m_WrapModeU;
 		int m_WrapModeV;
 		int m_Texture;
+		int m_TextureArrayIndex;
 		int m_Dimension;
 		SPoint m_ScreenTL;
 		SPoint m_ScreenBR;
@@ -308,6 +309,7 @@ public:
 		INITFLAG_VSYNC = 2,
 		INITFLAG_RESIZABLE = 4,
 		INITFLAG_BORDERLESS = 8,
+		INITFLAG_X11XRANDR = 16,
 	};
 
 	virtual ~IGraphicsBackend() {}
@@ -316,6 +318,7 @@ public:
 	virtual int Shutdown() = 0;
 
 	virtual int MemoryUsage() const = 0;
+	virtual int GetTextureArraySize() const = 0;
 
 	virtual int GetNumScreens() const = 0;
 
@@ -372,6 +375,7 @@ class CGraphics_Threaded : public IEngineGraphics
 
 	CTextureHandle m_InvalidTexture;
 
+	int m_TextureArrayIndex;
 	int m_aTextureIndices[MAX_TEXTURES];
 	int m_FirstFreeTexture;
 	int m_TextureMemoryUsage;
@@ -429,6 +433,7 @@ public:
 	virtual void SetColor(float r, float g, float b, float a);
 	virtual void SetColor4(vec4 TopLeft, vec4 TopRight, vec4 BottomLeft, vec4 BottomRight);
 
+	void TilesetFallbackSystem(int TextureIndex);
 	virtual void QuadsSetSubset(float TlU, float TlV, float BrU, float BrV, int TextureIndex = -1);
 	virtual void QuadsSetSubsetFree(
 		float x0, float y0, float x1, float y1,

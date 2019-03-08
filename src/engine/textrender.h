@@ -20,6 +20,7 @@ class CTextCursor
 public:
 	int m_Flags;
 	int m_LineCount;
+	int m_GlyphCount;
 	int m_CharCount;
 	int m_MaxLines;
 
@@ -51,7 +52,7 @@ public:
 	// old foolish interface
 	virtual void TextColor(float r, float g, float b, float a) = 0;
 	virtual void TextOutlineColor(float r, float g, float b, float a) = 0;
-	virtual void Text(void *pFontSetV, float x, float y, float Size, const char *pText, int MaxWidth) = 0;
+	virtual void Text(void *pFontSetV, float x, float y, float Size, const char *pText, int MaxWidth, bool MultiLine=true) = 0;
 	virtual float TextWidth(void *pFontSetV, float Size, const char *pText, int Length) = 0;
 	virtual int TextLineCount(void *pFontSetV, float Size, const char *pText, float LineWidth) = 0;
 

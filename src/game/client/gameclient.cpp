@@ -41,6 +41,7 @@
 #include "components/maplayers.h"
 #include "components/menus.h"
 #include "components/motd.h"
+#include "components/notifications.h"
 #include "components/particles.h"
 #include "components/players.h"
 #include "components/nameplates.h"
@@ -65,6 +66,7 @@ static CCountryFlags gs_CountryFlags;
 static CFlow gs_Flow;
 static CHud gs_Hud;
 static CDebugHud gs_DebugHud;
+static CNotifications gs_Notifications;
 static CControls gs_Controls;
 static CEffects gs_Effects;
 static CScoreboard gs_Scoreboard;
@@ -89,20 +91,31 @@ const char *CGameClient::Version() const { return GAME_VERSION; }
 const char *CGameClient::NetVersion() const { return GAME_NETVERSION; }
 int CGameClient::ClientVersion() const { return CLIENT_VERSION; }
 const char *CGameClient::GetItemName(int Type) const { return m_NetObjHandler.GetObjName(Type); }
+bool CGameClient::IsXmas() const { return g_Config.m_ClShowXmasHats == 2 || (g_Config.m_ClShowXmasHats == 1 && m_IsXmasDay); }
 
 const char *CGameClient::GetTeamName(int Team, bool Teamplay) const
 {
 	if(Teamplay)
 	{
 		if(Team == TEAM_RED)
-			return Localize("red team");
+			return Localize("red team", "'X joined the <red team>' (server message)");
 		else if(Team == TEAM_BLUE)
-			return Localize("blue team");
+			return Localize("blue team", "'X joined the <blue team>' (server message)");
 	}
 	else if(Team == 0)
-		return Localize("game");
+		return Localize("game", "'X joined the <game>' (server message)");
 
-	return Localize("spectators");
+	return Localize("spectators", "'X joined the <spectators>' (server message)");
+}
+
+void CGameClient::GetPlayerLabel(char* aBuf, int BufferSize, int ClientID, const char* ClientName)
+{
+	if(!g_Config.m_ClShowsocial)
+		str_format(aBuf, BufferSize, "%2d:", ClientID);
+	else if(g_Config.m_ClShowUserId)
+		str_format(aBuf, BufferSize, "%2d: %s", ClientID, ClientName);
+	else
+		str_format(aBuf, BufferSize, "%s", ClientName);
 }
 
 enum
@@ -132,8 +145,8 @@ static CGameMsg gs_GameMsgList[NUM_GAMEMSGS] = {
 	{/*GAMEMSG_CTF_DROP*/ DO_SPECIAL, PARA_NONE, ""},	// special - play ctf drop sound
 	{/*GAMEMSG_CTF_RETURN*/ DO_SPECIAL, PARA_NONE, ""},	// special - play ctf return sound
 
-	{/*GAMEMSG_TEAM_ALL*/ DO_SPECIAL, PARA_I, "All players were moved to the %s"},	// special - add team name
-	{/*GAMEMSG_TEAM_BALANCE_VICTIM*/ DO_SPECIAL, PARA_I, "You were moved to %s due to team balancing"},	// special - add team name
+	{/*GAMEMSG_TEAM_ALL*/ DO_SPECIAL, PARA_I, ""},	// special - add team name
+	{/*GAMEMSG_TEAM_BALANCE_VICTIM*/ DO_SPECIAL, PARA_I, ""},	// special - add team name
 	{/*GAMEMSG_CTF_GRAB*/ DO_SPECIAL, PARA_I, ""},	// special - play ctf grab sound based on team
 
 	{/*GAMEMSG_CTF_CAPTURE*/ DO_SPECIAL, PARA_III, ""},	// special - play ctf capture sound + capture chat message
@@ -184,6 +197,7 @@ void CGameClient::OnConsoleInit()
 	m_All.Add(m_pEffects); // doesn't render anything, just updates effects
 	m_All.Add(m_pParticles); // doesn't render anything, just updates all the particles
 	m_All.Add(m_pBinds);
+	m_All.Add(&m_pBinds->m_SpecialBinds);
 	m_All.Add(m_pControls);
 	m_All.Add(m_pCamera);
 	m_All.Add(m_pSounds);
@@ -205,9 +219,11 @@ void CGameClient::OnConsoleInit()
 	m_All.Add(m_pChat);
 	m_All.Add(&gs_Broadcast);
 	m_All.Add(&gs_DebugHud);
+	m_All.Add(&gs_Notifications);
 	m_All.Add(&gs_Scoreboard);
 	m_All.Add(m_pMotd);
 	m_All.Add(m_pMenus);
+	m_All.Add(&m_pMenus->m_Binder);
 	m_All.Add(m_pGameConsole);
 
 	// build the input stack
@@ -229,6 +245,7 @@ void CGameClient::OnConsoleInit()
 
 	Console()->Chain("add_friend", ConchainFriendUpdate, this);
 	Console()->Chain("remove_friend", ConchainFriendUpdate, this);
+	Console()->Chain("cl_show_xmas_hats", ConchainXmasHatUpdate, this);
 
 	for(int i = 0; i < m_All.m_Num; i++)
 		m_All.m_paComponents[i]->m_pClient = this;
@@ -249,7 +266,7 @@ void CGameClient::OnInit()
 	m_UI.SetGraphics(Graphics(), TextRender());
 	m_RenderTools.m_pGraphics = Graphics();
 	m_RenderTools.m_pUI = UI();
-	
+
 	int64 Start = time_get();
 
 	// set the language
@@ -283,7 +300,7 @@ void CGameClient::OnInit()
 	// setup load amount// load textures
 	for(int i = 0; i < g_pData->m_NumImages; i++)
 	{
-		g_pData->m_aImages[i].m_Id = Graphics()->LoadTexture(g_pData->m_aImages[i].m_pFilename, IStorage::TYPE_ALL, CImageInfo::FORMAT_AUTO, g_pData->m_aImages[i].m_Flag ? IGraphics::TEXLOAD_NOMIPMAPS : 0);
+		g_pData->m_aImages[i].m_Id = Graphics()->LoadTexture(g_pData->m_aImages[i].m_pFilename, IStorage::TYPE_ALL, CImageInfo::FORMAT_AUTO, g_pData->m_aImages[i].m_Flag ? IGraphics::TEXLOAD_LINEARMIPMAPS : 0);
 		m_pMenus->RenderLoading();
 	}
 
@@ -295,6 +312,8 @@ void CGameClient::OnInit()
 	Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "gameclient", aBuf);
 
 	m_ServerMode = SERVERMODE_PURE;
+
+	m_IsXmasDay = time_isxmasday();
 }
 
 void CGameClient::OnUpdate()
@@ -325,7 +344,6 @@ void CGameClient::OnUpdate()
 		}
 	}
 }
-
 
 int CGameClient::OnSnapInput(int *pData)
 {
@@ -358,19 +376,20 @@ void CGameClient::OnReset()
 	mem_zero(&m_Snap, sizeof(m_Snap));
 
 	for(int i = 0; i < MAX_CLIENTS; i++)
-		m_aClients[i].Reset(this);
+		m_aClients[i].Reset(this, i);
 
 	for(int i = 0; i < m_All.m_Num; i++)
 		m_All.m_paComponents[i]->OnReset();
 
 	m_LocalClientID = -1;
 	m_TeamCooldownTick = 0;
+	m_TeamChangeTime = 0.0f;
 	mem_zero(&m_GameInfo, sizeof(m_GameInfo));
 	m_DemoSpecMode = SPEC_FREEVIEW;
 	m_DemoSpecID = -1;
 	m_Tuning = CTuningParams();
+	m_MuteServerBroadcast = false;
 }
-
 
 void CGameClient::UpdatePositions()
 {
@@ -405,8 +424,8 @@ void CGameClient::UpdatePositions()
 			m_LocalCharacterPos = m_Snap.m_SpecInfo.m_Position;
 			m_Snap.m_SpecInfo.m_UsePosition = true;
 		}
-		else if(m_Snap.m_pSpectatorInfo && (Client()->State() == IClient::STATE_DEMOPLAYBACK || (m_Snap.m_SpecInfo.m_SpecMode != SPEC_FREEVIEW &&
-				m_Snap.m_pLocalInfo && (m_Snap.m_pLocalInfo->m_PlayerFlags&PLAYERFLAG_DEAD))))
+		else if(m_Snap.m_pSpectatorInfo && (Client()->State() == IClient::STATE_DEMOPLAYBACK || m_Snap.m_SpecInfo.m_SpecMode != SPEC_FREEVIEW ||
+				(m_Snap.m_pLocalInfo && (m_Snap.m_pLocalInfo->m_PlayerFlags&PLAYERFLAG_DEAD) && m_Snap.m_SpecInfo.m_SpecMode != SPEC_FREEVIEW)))
 		{
 			if(m_Snap.m_pPrevSpectatorInfo)
 				m_Snap.m_SpecInfo.m_Position = mix(vec2(m_Snap.m_pPrevSpectatorInfo->m_X, m_Snap.m_pPrevSpectatorInfo->m_Y),
@@ -418,7 +437,6 @@ void CGameClient::UpdatePositions()
 		}
 	}
 }
-
 
 void CGameClient::EvolveCharacter(CNetObj_Character *pCharacter, int Tick)
 {
@@ -438,7 +456,6 @@ void CGameClient::EvolveCharacter(CNetObj_Character *pCharacter, int Tick)
 
 	TempCore.Write(pCharacter);
 }
-
 
 void CGameClient::OnRender()
 {
@@ -510,12 +527,13 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 		// get paras
 		switch(gs_GameMsgList[GameMsgID].m_ParaType)
 		{
-		case PARA_III:
-			aParaI[NumParaI++] = pUnpacker->GetInt();
-		case PARA_II:
-			aParaI[NumParaI++] = pUnpacker->GetInt();
-		case PARA_I:
-			aParaI[NumParaI++] = pUnpacker->GetInt();
+		case PARA_I: NumParaI = 1; break;
+		case PARA_II: NumParaI = 2; break;
+		case PARA_III: NumParaI = 3; break;
+		}
+		for(int i = 0; i < NumParaI; i++)
+		{
+			aParaI[i] = pUnpacker->GetInt();
 		}
 
 		// check for unpacking errors
@@ -523,7 +541,7 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 			return;
 
 		// handle special messages
-		static char aBuf[256];
+		char aBuf[256];
 		if(gs_GameMsgList[GameMsgID].m_Action == DO_SPECIAL)
 		{
 			switch(GameMsgID)
@@ -538,8 +556,12 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 					return;
 				m_pSounds->Enqueue(CSounds::CHN_GLOBAL, SOUND_CTF_RETURN);
 				break;
+			case GAMEMSG_TEAM_ALL:
+				str_format(aBuf, sizeof(aBuf), Localize("All players were moved to the %s"), GetTeamName(aParaI[0], m_GameInfo.m_GameFlags&GAMEFLAG_TEAMS));
+				m_pBroadcast->DoBroadcast(aBuf);
+				break;
 			case GAMEMSG_TEAM_BALANCE_VICTIM:
-				str_format(aBuf, sizeof(aBuf), Localize(gs_GameMsgList[GameMsgID].m_pText), GetTeamName(aParaI[0], m_GameInfo.m_GameFlags&GAMEFLAG_TEAMS));
+				str_format(aBuf, sizeof(aBuf), Localize("You were moved to %s due to team balancing"), GetTeamName(aParaI[0], m_GameInfo.m_GameFlags&GAMEFLAG_TEAMS));
 				m_pBroadcast->DoBroadcast(aBuf);
 				break;
 			case GAMEMSG_CTF_GRAB:
@@ -556,12 +578,15 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 			case GAMEMSG_CTF_CAPTURE:
 				m_pSounds->Enqueue(CSounds::CHN_GLOBAL, SOUND_CTF_CAPTURE);
 				int ClientID = clamp(aParaI[1], 0, MAX_CLIENTS - 1);
+				char aLabel[64];
+				GetPlayerLabel(aLabel, sizeof(aLabel), ClientID, m_aClients[ClientID].m_aName);
+
 				if(aParaI[2] <= 60*Client()->GameTickSpeed())
-					str_format(aBuf, sizeof(aBuf), Localize("The %s flag was captured by '%2d: %s' (%.2f seconds)"), aParaI[0] ? Localize("blue") : Localize("red"),
-						ClientID, g_Config.m_ClShowsocial ? m_aClients[ClientID].m_aName : "", aParaI[2]/(float)Client()->GameTickSpeed());
+					str_format(aBuf, sizeof(aBuf), Localize("The %s was captured by '%s' (%.2f seconds)"), aParaI[0] ? Localize("blue flag") : Localize("red flag"),
+						aLabel, aParaI[2]/(float)Client()->GameTickSpeed());
 				else
-					str_format(aBuf, sizeof(aBuf), Localize("The %s flag was captured by '%2d: %s'"), aParaI[0] ? Localize("blue") : Localize("red"),
-						ClientID, g_Config.m_ClShowsocial ? m_aClients[ClientID].m_aName : "");
+					str_format(aBuf, sizeof(aBuf), Localize("The %s was captured by '%s'"), aParaI[0] ? Localize("blue flag") : Localize("red flag"),
+						aLabel);
 				m_pChat->AddLine(-1, 0, aBuf);
 			}
 			return;
@@ -570,16 +595,8 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 		// build message
 		const char *pText = "";
 		if(NumParaI == 0)
-			pText = Localize(gs_GameMsgList[GameMsgID].m_pText);
-		else
 		{
-			if(NumParaI == 1)
-				str_format(aBuf, sizeof(aBuf), Localize(gs_GameMsgList[GameMsgID].m_pText), aParaI[0]);
-			else if(NumParaI == 2)
-				str_format(aBuf, sizeof(aBuf), Localize(gs_GameMsgList[GameMsgID].m_pText), aParaI[0], aParaI[1]);
-			else if(NumParaI == 3)
-				str_format(aBuf, sizeof(aBuf), Localize(gs_GameMsgList[GameMsgID].m_pText), aParaI[0], aParaI[1], aParaI[2]);
-			pText = aBuf;
+			pText = Localize(gs_GameMsgList[GameMsgID].m_pText);
 		}
 
 		// handle message
@@ -590,6 +607,7 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 			break;
 		case DO_BROADCAST:
 			m_pBroadcast->DoBroadcast(pText);
+			break;
 		}
 	}
 
@@ -620,6 +638,7 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 				return;
 			}
 			m_LocalClientID = pMsg->m_ClientID;
+			m_TeamChangeTime = Client()->LocalTime();
 		}
 		else
 		{
@@ -633,7 +652,7 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 			if(m_LocalClientID != -1 && !pMsg->m_Silent)
 			{
 				DoEnterMessage(pMsg->m_pName, pMsg->m_ClientID, pMsg->m_Team);
-				
+
 				if(m_pDemoRecorder->IsRecording())
 				{
 					CNetMsg_De_ClientEnter Msg;
@@ -660,7 +679,7 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 		// update friend state
 		m_aClients[pMsg->m_ClientID].m_Friend = Friends()->IsFriend(m_aClients[pMsg->m_ClientID].m_aName, m_aClients[pMsg->m_ClientID].m_aClan, true);
 
-		m_aClients[pMsg->m_ClientID].UpdateRenderInfo(this, true);
+		m_aClients[pMsg->m_ClientID].UpdateRenderInfo(this, pMsg->m_ClientID, true);
 
 		m_GameInfo.m_NumPlayers++;
 		// calculate team-balance
@@ -695,7 +714,7 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 		if(m_aClients[pMsg->m_ClientID].m_Team != TEAM_SPECTATORS)
 			m_GameInfo.m_aTeamSize[m_aClients[pMsg->m_ClientID].m_Team]--;
 
-		m_aClients[pMsg->m_ClientID].Reset(this);
+		m_aClients[pMsg->m_ClientID].Reset(this, pMsg->m_ClientID);
 	}
 	else if(MsgId == NETMSGTYPE_SV_GAMEINFO && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 	{
@@ -737,16 +756,19 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker)
 			if(m_aClients[pMsg->m_ClientID].m_Team != TEAM_SPECTATORS)
 				m_GameInfo.m_aTeamSize[m_aClients[pMsg->m_ClientID].m_Team]++;
 
-			m_aClients[pMsg->m_ClientID].UpdateRenderInfo(this, false);
+			m_aClients[pMsg->m_ClientID].UpdateRenderInfo(this, pMsg->m_ClientID, false);
 
 			if(pMsg->m_ClientID == m_LocalClientID)
+			{
 				m_TeamCooldownTick = pMsg->m_CooldownTick;
+				m_TeamChangeTime = Client()->LocalTime();
+			}
 		}
 
 		if(pMsg->m_Silent == 0)
 		{
 			DoTeamChangeMessage(m_aClients[pMsg->m_ClientID].m_aName, pMsg->m_ClientID, pMsg->m_Team);
-		}		
+		}
 	}
 	else if(MsgId == NETMSGTYPE_SV_READYTOENTER)
 	{
@@ -819,10 +841,10 @@ void CGameClient::ProcessEvents()
 		IClient::CSnapItem Item;
 		const void *pData = Client()->SnapGetItem(SnapType, Index, &Item);
 
-		if(Item.m_Type == NETEVENTTYPE_DAMAGEIND)
+		if(Item.m_Type == NETEVENTTYPE_DAMAGE)
 		{
-			CNetEvent_DamageInd *ev = (CNetEvent_DamageInd *)pData;
-			m_pEffects->DamageIndicator(vec2(ev->m_X, ev->m_Y), direction(ev->m_Angle/256.0f));
+			CNetEvent_Damage *ev = (CNetEvent_Damage *)pData;
+			m_pEffects->DamageIndicator(vec2(ev->m_X, ev->m_Y), ev->m_HealthAmount + ev->m_ArmorAmount);
 		}
 		else if(Item.m_Type == NETEVENTTYPE_EXPLOSION)
 		{
@@ -983,7 +1005,7 @@ void CGameClient::OnNewSnapshot()
 					m_ServerMode = SERVERMODE_PURE;
 				}
 			}
-			
+
 			// network items
 			if(Item.m_Type == NETOBJTYPE_PLAYERINFO)
 			{
@@ -1018,7 +1040,7 @@ void CGameClient::OnNewSnapshot()
 					// clamp ammo count for non ninja weapon
 					if(m_Snap.m_aCharacters[Item.m_ID].m_Cur.m_Weapon != WEAPON_NINJA)
 						m_Snap.m_aCharacters[Item.m_ID].m_Cur.m_AmmoCount = clamp(m_Snap.m_aCharacters[Item.m_ID].m_Cur.m_AmmoCount, 0, 10);
-					
+
 					if(pOld)
 					{
 						m_Snap.m_aCharacters[Item.m_ID].m_Active = true;
@@ -1143,7 +1165,7 @@ void CGameClient::OnNewSnapshot()
 		for(int i = 0; i < MAX_CLIENTS; ++i)
 		{
 			if(m_aClients[i].m_Active)
-				m_aClients[i].UpdateRenderInfo(this, true);
+				m_aClients[i].UpdateRenderInfo(this, i, true);
 		}
 	}
 
@@ -1199,7 +1221,7 @@ void CGameClient::OnDemoRecSnap()
 	CNetObj_De_GameInfo *pGameInfo = static_cast<CNetObj_De_GameInfo *>(Client()->SnapNewItem(NETOBJTYPE_DE_GAMEINFO, 0, sizeof(CNetObj_De_GameInfo)));
 	if(!pGameInfo)
 		return;
-	
+
 	pGameInfo->m_GameFlags = m_GameInfo.m_GameFlags;
 	pGameInfo->m_ScoreLimit = m_GameInfo.m_ScoreLimit;
 	pGameInfo->m_TimeLimit = m_GameInfo.m_TimeLimit;
@@ -1321,12 +1343,19 @@ void CGameClient::OnActivateEditor()
 	OnRelease();
 }
 
-void CGameClient::CClientData::UpdateRenderInfo(CGameClient *pGameClient, bool UpdateSkinInfo)
+void CGameClient::CClientData::UpdateRenderInfo(CGameClient *pGameClient, int ClientID, bool UpdateSkinInfo)
 {
 	// update skin info
 	if(UpdateSkinInfo)
 	{
 		m_SkinInfo.m_Size = 64;
+		if(pGameClient->IsXmas())
+		{
+			m_SkinInfo.m_HatTexture = pGameClient->m_pSkins->m_XmasHatTexture;
+			m_SkinInfo.m_HatSpriteIndex = ClientID % CSkins::HAT_NUM;
+		}
+		else
+			m_SkinInfo.m_HatTexture.Invalidate();
 
 		for(int p = 0; p < NUM_SKINPARTS; p++)
 		{
@@ -1344,7 +1373,16 @@ void CGameClient::CClientData::UpdateRenderInfo(CGameClient *pGameClient, bool U
 					m_SkinPartIDs[p] = ID;
 			}
 			else
+			{
+				if(m_SkinInfo.m_HatTexture.IsValid())
+				{
+					if(p == SKINPART_BODY && str_comp(m_aaSkinPartNames[p], "standard"))
+						m_SkinInfo.m_HatSpriteIndex = CSkins::HAT_OFFSET_SIDE + (ClientID%CSkins::HAT_NUM);
+					if(p == SKINPART_DECORATION && !str_comp(m_aaSkinPartNames[p], "twinbopp"))
+						m_SkinInfo.m_HatSpriteIndex = CSkins::HAT_OFFSET_SIDE + (ClientID%CSkins::HAT_NUM);
+				}
 				m_SkinPartIDs[p] = ID;
+			}
 
 			const CSkins::CSkinPart *pSkinPart = pGameClient->m_pSkins->GetSkinPart(p, m_SkinPartIDs[p]);
 			if(m_aUseCustomColors[p])
@@ -1374,7 +1412,7 @@ void CGameClient::CClientData::UpdateRenderInfo(CGameClient *pGameClient, bool U
 	}
 }
 
-void CGameClient::CClientData::Reset(CGameClient *pGameClient)
+void CGameClient::CClientData::Reset(CGameClient *pGameClient, int ClientID)
 {
 	m_aName[0] = 0;
 	m_aClan[0] = 0;
@@ -1392,23 +1430,25 @@ void CGameClient::CClientData::Reset(CGameClient *pGameClient)
 		m_SkinInfo.m_aTextures[p] = pGameClient->m_pSkins->GetSkinPart(p, 0)->m_ColorTexture;
 		m_SkinInfo.m_aColors[p] = vec4(1.0f, 1.0f, 1.0f , 1.0f);
 	}
-	UpdateRenderInfo(pGameClient, false);
+	UpdateRenderInfo(pGameClient, ClientID, false);
 }
 
 void CGameClient::DoEnterMessage(const char *pName, int ClientID, int Team)
 {
-	char aBuf[128];
-	str_format(aBuf, sizeof(aBuf), Localize("'%2d: %s' entered and joined the %s"), ClientID, g_Config.m_ClShowsocial ? pName : "", GetTeamName(Team, m_GameInfo.m_GameFlags&GAMEFLAG_TEAMS));
+	char aBuf[128], aLabel[64];
+	GetPlayerLabel(aLabel, sizeof(aLabel), ClientID, pName);
+	str_format(aBuf, sizeof(aBuf), Localize("'%s' entered and joined the %s"), aLabel, GetTeamName(Team, m_GameInfo.m_GameFlags&GAMEFLAG_TEAMS));
 	m_pChat->AddLine(-1, 0, aBuf);
 }
 
 void CGameClient::DoLeaveMessage(const char *pName, int ClientID, const char *pReason)
 {
-	char aBuf[128];
+	char aBuf[128], aLabel[64];
+	GetPlayerLabel(aLabel, sizeof(aLabel), ClientID, pName);
 	if(pReason[0])
-		str_format(aBuf, sizeof(aBuf), Localize("'%2d: %s' has left the game (%s)"), ClientID, g_Config.m_ClShowsocial ? pName : "", pReason);
+		str_format(aBuf, sizeof(aBuf), Localize("'%s' has left the game (%s)"), aLabel, pReason);
 	else
-		str_format(aBuf, sizeof(aBuf), Localize("'%2d: %s' has left the game"), ClientID, g_Config.m_ClShowsocial ? pName : "");
+		str_format(aBuf, sizeof(aBuf), Localize("'%s' has left the game"), aLabel);
 	m_pChat->AddLine(-1, 0, aBuf);
 }
 
@@ -1461,7 +1501,7 @@ void CGameClient::ConTeam(IConsole::IResult *pResult, void *pUserData)
 	CMenus::CSwitchTeamInfo Info;
 	pClient->m_pMenus->GetSwitchTeamInfo(&Info);
 	int Team = pResult->GetInteger(0);
-	if(pClient->m_aClients[pClient->m_LocalClientID].m_Team == Team || (Team == TEAM_SPECTATORS && !(Info.m_AllowSpec)) || Info.m_aNotification[0])
+	if(pClient->m_aClients[pClient->m_LocalClientID].m_Team == Team || (Team == TEAM_SPECTATORS && !(Info.m_AllowSpec)) || (Team != TEAM_SPECTATORS && Info.m_aNotification[0]))
 	{
 		if(Info.m_aNotification[0])
 			pClient->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "gameclient", Info.m_aNotification);
@@ -1488,6 +1528,17 @@ void CGameClient::ConchainFriendUpdate(IConsole::IResult *pResult, void *pUserDa
 	{
 		if(pClient->m_aClients[i].m_Active)
 			pClient->m_aClients[i].m_Friend = pClient->Friends()->IsFriend(pClient->m_aClients[i].m_aName, pClient->m_aClients[i].m_aClan, true);
+	}
+}
+
+void CGameClient::ConchainXmasHatUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData)
+{
+	pfnCallback(pResult, pCallbackUserData);
+	CGameClient *pClient = static_cast<CGameClient *>(pUserData);
+	for(int i = 0; i < MAX_CLIENTS; ++i)
+	{
+		if(pClient->m_aClients[i].m_Active)
+			pClient->m_aClients[i].UpdateRenderInfo(pClient, i, true);
 	}
 }
 

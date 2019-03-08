@@ -5,8 +5,6 @@
 
 class CUIRect
 {
-	// TODO: Refactor: Redo UI scaling
-	float Scale() const;
 public:
 	float x, y, w, h;
 
@@ -110,17 +108,15 @@ public:
 	float PixelSize();
 	void ClipEnable(const CUIRect *pRect);
 	void ClipDisable();
-
-	// TODO: Refactor: Redo UI scaling
-	float Scale() const;
+	const CUIRect *ClipArea() const { return &m_ClipRect; };
+	inline bool IsClipped() const { return m_Clipped; };
 
 	int DoButtonLogic(const void *pID, const char *pText /* TODO: Refactor: Remove */, int Checked, const CUIRect *pRect);
 	int DoPickerLogic(const void *pID, const CUIRect *pRect, float *pX, float *pY);
 	int DoColorSelectionLogic(const CUIRect *pRect, const CUIRect *pButton);
 
 	// TODO: Refactor: Remove this?
-	void DoLabel(const CUIRect *pRect, const char *pText, float Size, EAlignment Align, int MaxWidth = -1);
-	void DoLabelScaled(const CUIRect *pRect, const char *pText, float Size, EAlignment Align, int MaxWidth = -1);
+	void DoLabel(const CUIRect *pRect, const char *pText, float Size, EAlignment Align, int MaxWidth = -1, bool MultiLine = true);
 };
 
 

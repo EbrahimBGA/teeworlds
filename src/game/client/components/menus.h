@@ -24,6 +24,7 @@ class CMenusKeyBinder : public CComponent
 public:
 	bool m_TakeKey;
 	bool m_GotKey;
+	int m_Modifier;
 	IInput::CEvent m_Key;
 	CMenusKeyBinder();
 	virtual bool OnInput(IInput::CEvent Event);
@@ -70,8 +71,9 @@ private:
 	*/
 
 	int DoIcon(int ImageId, int SpriteId, const CUIRect *pRect);
-	int DoButton_GridHeader(const void *pID, const char *pText, int Checked, const CUIRect *pRect);
-	int DoButton_GridHeaderIcon(CButtonContainer *pBC, int ImageID, int SpriteID, const CUIRect *pRect, int Corners);
+	void DoIconColor(int ImageId, int SpriteId, const CUIRect *pRect, const vec4& Color);
+	int DoButton_GridHeader(const void *pID, const char *pText, int Checked, CUI::EAlignment Align, const CUIRect *pRect);
+	// int DoButton_GridHeaderIcon(CButtonContainer *pBC, int ImageID, int SpriteID, const CUIRect *pRect, int Corners);
 
 	//static void ui_draw_browse_icon(int what, const CUIRect *r);
 	//static void ui_draw_grid_header(const void *id, const char *text, int checked, const CUIRect *r, const void *extra);
@@ -82,7 +84,7 @@ private:
 	*/
 	int DoEditBox(void *pID, const CUIRect *pRect, char *pStr, unsigned StrSize, float FontSize, float *pOffset, bool Hidden=false, int Corners=CUI::CORNER_ALL);
 	void DoEditBoxOption(void *pID, char *pOption, int OptionLength, const CUIRect *pRect, const char *pStr, float VSplitVal, float *pOffset, bool Hidden=false);
-	void DoScrollbarOption(void *pID, int *pOption, const CUIRect *pRect, const char *pStr, float VSplitVal, int Min, int Max, bool infinite=false);
+	void DoScrollbarOption(void *pID, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, bool Infinite=false);
 	float DoDropdownMenu(void *pID, const CUIRect *pRect, const char *pStr, float HeaderHeight, FDropdownCallback pfnCallback);
 	float DoIndependentDropdownMenu(void *pID, const CUIRect *pRect, const char *pStr, float HeaderHeight, FDropdownCallback pfnCallback, bool* pActive);
 	void DoInfoBox(const CUIRect *pRect, const char *pLable, const char *pValue);
@@ -91,7 +93,7 @@ private:
 	float DoScrollbarV(const void *pID, const CUIRect *pRect, float Current);
 	float DoScrollbarH(const void *pID, const CUIRect *pRect, float Current);
 	void DoButton_KeySelect(CButtonContainer *pBC, const char *pText, int Checked, const CUIRect *pRect);
-	int DoKeyReader(CButtonContainer *pPC, const CUIRect *pRect, int Key);
+	int DoKeyReader(CButtonContainer *pPC, const CUIRect *pRect, int Key, int Modifier, int* NewModifier);
 
 	//static int ui_do_key_reader(void *id, const CUIRect *rect, int key);
 	void UiDoGetButtons(int Start, int Stop, CUIRect View, float ButtonHeight, float Spacing);
@@ -127,12 +129,112 @@ private:
 	void UiDoListboxHeader(CListBoxState* pState, const CUIRect *pRect, const char *pTitle, float HeaderHeight, float Spacing);
 	void UiDoListboxStart(CListBoxState* pState, const void *pID, float RowHeight, const char *pBottomText, int NumItems,
 						int ItemsPerRow, int SelectedIndex, const CUIRect *pRect=0, bool Background=true);
-	CListboxItem UiDoListboxNextItem(CListBoxState* pState, const void *pID, bool Selected = false);
+	CListboxItem UiDoListboxNextItem(CListBoxState* pState, const void *pID, bool Selected = false, bool* pActive = NULL);
 	CListboxItem UiDoListboxNextRow(CListBoxState* pState);
 	int UiDoListboxEnd(CListBoxState* pState, bool *pItemActivated);
 
 	//static void demolist_listdir_callback(const char *name, int is_dir, void *user);
 	//static void demolist_list_callback(const CUIRect *rect, int index, void *user);
+
+	struct CScrollRegionParams
+	{
+		float m_ScrollbarWidth;
+		float m_ScrollbarMargin;
+		float m_SliderMinHeight;
+		float m_ScrollSpeed;
+		vec4 m_ClipBgColor;
+		vec4 m_ScrollbarBgColor;
+		vec4 m_RailBgColor;
+		vec4 m_SliderColor;
+		vec4 m_SliderColorHover;
+		vec4 m_SliderColorGrabbed;
+		int m_Flags;
+
+		enum {
+			FLAG_CONTENT_STATIC_WIDTH = 0x1
+		};
+
+		CScrollRegionParams()
+		{
+			m_ScrollbarWidth = 20;
+			m_ScrollbarMargin = 5;
+			m_SliderMinHeight = 25;
+			m_ScrollSpeed = 5;
+			m_ClipBgColor = vec4(0.0f, 0.0f, 0.0f, 0.5f);
+			m_ScrollbarBgColor = vec4(0.0f, 0.0f, 0.0f, 0.5f);
+			m_RailBgColor = vec4(1.0f, 1.0f, 1.0f, 0.25f);
+			m_SliderColor = vec4(0.8f, 0.8f, 0.8f, 1.0f);
+			m_SliderColorHover = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+			m_SliderColorGrabbed = vec4(0.9f, 0.9f, 0.9f, 1.0f);
+			m_Flags = 0;
+		}
+	};
+
+	struct CScrollRegion
+	{
+		float m_ScrollY;
+		float m_ContentH;
+		float m_RequestScrollY; // [0, ContentHeight]
+		CUIRect m_ClipRect;
+		CUIRect m_OldClipRect;
+		CUIRect m_RailRect;
+		CUIRect m_LastAddedRect; // saved for ScrollHere()
+		vec2 m_MouseGrabStart;
+		vec2 m_ContentScrollOff;
+		bool m_WasClipped;
+		CScrollRegionParams m_Params;
+
+		enum {
+			SCROLLHERE_KEEP_IN_VIEW=0,
+			SCROLLHERE_TOP,
+			SCROLLHERE_BOTTOM,
+		};
+
+		CScrollRegion()
+		{
+			m_ScrollY = 0;
+			m_ContentH = 0;
+			m_RequestScrollY = -1;
+			m_ContentScrollOff = vec2(0,0);
+			m_WasClipped = false;
+			m_Params = CScrollRegionParams();
+		}
+	};
+
+	// Scroll region
+	/*
+
+	Usage:
+		-- Initialization --
+		static CScrollRegion s_ScrollRegion;
+		vec2 ScrollOffset(0, 0);
+		BeginScrollRegion(&s_ScrollRegion, &ScrollRegionRect, &ScrollOffset);
+		Content = ScrollRegionRect;
+		Content.y += ScrollOffset.y;
+
+		-- "Register" your content rects --
+		CUIRect Rect;
+		Content.HSplitTop(SomeValue, &Rect, &Content);
+		ScrollRegionAddRect(&s_ScrollRegion, Rect);
+
+		-- [Optionnal] Knowing if a rect is clipped --
+		ScrollRegionIsRectClipped(&s_ScrollRegion, Rect);
+
+		-- [Optionnal] Scroll to a rect (to the last added rect)--
+		...
+		ScrollRegionAddRect(&s_ScrollRegion, Rect);
+		ScrollRegionScrollHere(&s_ScrollRegion, Option);
+
+		-- End --
+		EndScrollRegion(&s_ScrollRegion);
+
+	*/
+
+	void BeginScrollRegion(CScrollRegion* pSr, CUIRect* pClipRect, vec2* pOutOffset, const CScrollRegionParams* pParams = 0);
+	void EndScrollRegion(CScrollRegion* pSr);
+	void ScrollRegionAddRect(CScrollRegion* pSr, CUIRect Rect);
+	void ScrollRegionScrollHere(CScrollRegion* pSr, int Option = CScrollRegion::SCROLLHERE_KEEP_IN_VIEW);
+	bool ScrollRegionIsRectClipped(CScrollRegion* pSr, const CUIRect& Rect);
 
 	enum
 	{
@@ -147,6 +249,7 @@ private:
 		POPUP_DELETE_DEMO,
 		POPUP_RENAME_DEMO,
 		POPUP_REMOVE_FRIEND,
+		POPUP_REMOVE_FILTER,
 		POPUP_SAVE_SKIN,
 		POPUP_DELETE_SKIN,
 		POPUP_SOUNDERROR,
@@ -175,7 +278,8 @@ private:
 		SETTINGS_GRAPHICS,
 		SETTINGS_SOUND,
 
-		ACTLB_LANG=0,
+		ACTLB_NONE=0,
+		ACTLB_LANG,
 		ACTLB_THEME,
 	};
 
@@ -183,6 +287,7 @@ private:
 	int m_Popup;
 	int m_ActivePage;
 	int m_MenuPage;
+	int m_MenuPageOld;
 	bool m_MenuActive;
 	int m_SidebarTab;
 	bool m_SidebarActive;
@@ -217,12 +322,32 @@ private:
 		bool m_HasDay;
 		bool m_HasNight;
 		IGraphics::CTextureHandle m_IconTexture;
-		bool operator<(const CTheme &Other) { return m_Name < Other.m_Name; }
+		bool operator<(const CTheme &Other) const { return m_Name < Other.m_Name; }
 	};
 	sorted_array<CTheme> m_lThemes;
 
 	static int ThemeScan(const char *pName, int IsDir, int DirType, void *pUser);
 	static int ThemeIconScan(const char *pName, int IsDir, int DirType, void *pUser);
+
+	// gametype icons
+	class CGameIcon
+	{
+	public:
+		enum
+		{
+			GAMEICON_SIZE=64,
+			GAMEICON_OLDHEIGHT=192,
+		};
+		CGameIcon() {};
+		CGameIcon(const char *pName) : m_Name(pName) {}
+
+		string m_Name;
+		IGraphics::CTextureHandle m_IconTexture;
+	};
+	array<CGameIcon> m_lGameIcons;
+	IGraphics::CTextureHandle m_GameIconDefault;
+	void DoGameIcon(const char *pName, const CUIRect *pRect);
+	static int GameIconScan(const char *pName, int IsDir, int DirType, void *pUser);
 
 	int64 m_LastInput;
 
@@ -245,6 +370,8 @@ private:
 	static float ms_BackgroundAlpha;
 
 	// for settings
+	bool m_NeedRestartPlayer;
+	bool m_NeedRestartTee;
 	bool m_NeedRestartGraphics;
 	bool m_NeedRestartSound;
 	int m_TeePartSelected;
@@ -287,7 +414,7 @@ private:
 		bool m_Valid;
 		CDemoHeader m_Info;
 
-		bool operator<(const CDemoItem &Other) { return !str_comp(m_aFilename, "..") ? true : !str_comp(Other.m_aFilename, "..") ? false :
+		bool operator<(const CDemoItem &Other) const { return !str_comp(m_aFilename, "..") ? true : !str_comp(Other.m_aFilename, "..") ? false :
 														m_IsDir && !Other.m_IsDir ? true : !m_IsDir && Other.m_IsDir ? false :
 														str_comp_filenames(m_aFilename, Other.m_aFilename) < 0; }
 	};
@@ -309,19 +436,18 @@ private:
 	class CFriendItem
 	{
 	public:
-		const CFriendInfo *m_pFriendInfo;
 		const CServerInfo *m_pServerInfo;
 		char m_aName[MAX_NAME_LENGTH];
 		char m_aClan[MAX_CLAN_LENGTH];
+		int m_FriendState;
 		bool m_IsPlayer;
 
 		CFriendItem()
 		{
-			m_pFriendInfo = 0;
 			m_pServerInfo = 0;
 		}
 
-		bool operator<(const CFriendItem &Other)
+		bool operator<(const CFriendItem &Other) const
 		{
 			if(m_aName[0] && !Other.m_aName[0])
 				return true;
@@ -395,6 +521,7 @@ private:
 	array<CBrowserFilter> m_lFilters;
 
 	int m_SelectedFilter;
+	int m_RemoveFilterIndex;
 
 	void LoadFilters();
 	void SaveFilters();
@@ -454,6 +581,7 @@ private:
 		int m_Flags;
 		CUIRect m_Rect;
 		CUIRect m_Spacer;
+		CUI::EAlignment m_Align;
 	};
 
 	static CColumn ms_aBrowserCols[NUM_BROWSER_COLS];
@@ -504,7 +632,7 @@ private:
 	void HandleCallvote(int Page, bool Force);
 	void RenderServerControl(CUIRect MainView);
 	void RenderServerControlKick(CUIRect MainView, bool FilterSpectators);
-	void RenderServerControlServer(CUIRect MainView);
+	bool RenderServerControlServer(CUIRect MainView);
 
 	// found in menus_browser.cpp
 	// int m_ScrollOffset;
@@ -515,12 +643,12 @@ private:
 	void RenderServerbrowserInfoTab(CUIRect View);
 	void RenderServerbrowserFriendList(CUIRect View);
 	void RenderDetailInfo(CUIRect View, const CServerInfo *pInfo);
-	void RenderDetailScoreboard(CUIRect View, const CServerInfo *pInfo, int Column);
+	void RenderDetailScoreboard(CUIRect View, const CServerInfo *pInfo, int RowCount, vec4 TextColor = vec4(1,1,1,1));
 	void RenderServerbrowserServerDetail(CUIRect View, const CServerInfo *pInfo);
 	//void RenderServerbrowserFriends(CUIRect View);
 	void RenderServerbrowserBottomBox(CUIRect View);
 	void RenderServerbrowserOverlay();
-	bool RenderFilterHeader(CUIRect View, int FilterIndex);
+	void RenderFilterHeader(CUIRect View, int FilterIndex);
 	int DoBrowserEntry(const void *pID, CUIRect View, const CServerInfo *pEntry, const CBrowserFilter *pFilter, bool Selected);
 	void RenderServerbrowser(CUIRect MainView);
 	static void ConchainFriendlistUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);

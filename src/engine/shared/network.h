@@ -10,10 +10,10 @@
 
 CURRENT:
 	packet header: 7 bytes (9 bytes for connless)
-		unsigned char flags_ack;	// 6bit flags, 2bit ack
-		unsigned char ack;			// 8bit ack
-		unsigned char numchunks;	// 8bit chunks
-		unsigned char token[4];		// 32bit token
+		unsigned char flags_ack;    // 6bit flags, 2bit ack
+		unsigned char ack;          // 8bit ack
+		unsigned char numchunks;    // 8bit chunks
+		unsigned char token[4];     // 32bit token
 		// ffffffaa
 		// aaaaaaaa
 		// NNNNNNNN
@@ -106,7 +106,7 @@ enum
 	NET_TOKENREQUEST_DATASIZE = 512,
 
 	//
-	NET_MAX_CLIENTS = 16,
+	NET_MAX_CLIENTS = 64,
 	NET_MAX_CONSOLE_CLIENTS = 4,
 	
 	NET_MAX_SEQUENCE = 1<<10,

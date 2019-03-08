@@ -84,6 +84,7 @@ void CHud::RenderPauseTimer()
 				str_format(aBuf, sizeof(aBuf), Localize("%d players not ready"), m_pClient->m_Snap.m_NotReadyCount);
 			else
 				return;
+			RenderReadyUpNotification();
 		}
 		else
 		{
@@ -291,7 +292,7 @@ void CHud::RenderScoreHud()
 					int ID = aPlayerInfo[t].m_ClientID;
 					char aName[64];
 					str_format(aName, sizeof(aName), "%s", g_Config.m_ClShowsocial ? m_pClient->m_aClients[ID].m_aName : "");
-					float w = TextRender()->TextWidth(0, 8.0f, aName, -1);
+					float w = TextRender()->TextWidth(0, 8.0f, aName, -1) + RenderTools()->GetClientIdRectSize(8.0f);
 
 					CTextCursor Cursor;
 					float x = min(Whole-w-1.0f, Whole-ScoreWidthMax-ImageSize-2*Split-PosSize);
@@ -344,9 +345,15 @@ void CHud::RenderWarmupTimer()
 		if(m_pClient->m_Snap.m_pGameData->m_GameStateEndTick == 0)
 		{
 			if(m_pClient->m_Snap.m_NotReadyCount == 1)
+			{
 				str_format(aBuf, sizeof(aBuf), Localize("%d player not ready"), m_pClient->m_Snap.m_NotReadyCount);
+				RenderReadyUpNotification();
+			}
 			else if(m_pClient->m_Snap.m_NotReadyCount > 1)
+			{
 				str_format(aBuf, sizeof(aBuf), Localize("%d players not ready"), m_pClient->m_Snap.m_NotReadyCount);
+				RenderReadyUpNotification();
+			}
 			else
 			{
 				str_format(aBuf, sizeof(aBuf), Localize("wait for more players"));
@@ -450,13 +457,14 @@ void CHud::RenderVoting()
 	CUIRect Base = {5, 88, 100, 4};
 	m_pClient->m_pVoting->RenderBars(Base, false);
 
-	const char *pYesKey = m_pClient->m_pBinds->GetKey("vote yes");
-	const char *pNoKey = m_pClient->m_pBinds->GetKey("vote no");
-	str_format(aBuf, sizeof(aBuf), "%s - %s", pYesKey, Localize("Vote yes"));
+	char aBufYes[64], aBufNo[64];
+	m_pClient->m_pBinds->GetKey("vote yes", aBufYes, sizeof(aBufYes));
+	m_pClient->m_pBinds->GetKey("vote no", aBufNo, sizeof(aBufNo));
+	str_format(aBuf, sizeof(aBuf), "%s - %s", aBufYes, Localize("Vote yes"));
 	Base.y += Base.h+1;
 	UI()->DoLabel(&Base, aBuf, 6.0f, CUI::ALIGN_LEFT);
 
-	str_format(aBuf, sizeof(aBuf), "%s - %s", Localize("Vote no"), pNoKey);
+	str_format(aBuf, sizeof(aBuf), "%s - %s", Localize("Vote no"), aBufNo);
 	UI()->DoLabel(&Base, aBuf, 6.0f, CUI::ALIGN_RIGHT);
 }
 
@@ -618,7 +626,8 @@ void CHud::RenderHealthAndAmmo(const CNetObj_Character *pCharacter)
 void CHud::RenderSpectatorHud()
 {
 	// draw the box
-	CUIRect Rect = {m_Width-180.0f, m_Height-15.0f, 180.0f, 15.0f};
+	const float Width = m_Width * 0.25f - 2.0f;
+	CUIRect Rect = {m_Width-Width, m_Height-15.0f, Width, 15.0f};
 	RenderTools()->DrawUIRect(&Rect, vec4(0.0f, 0.0f, 0.0f, 0.4f), CUI::CORNER_TL, 5.0f);
 
 	// draw the text
@@ -629,7 +638,7 @@ void CHud::RenderSpectatorHud()
 	char aBuf[128];
 
 	CTextCursor Cursor;
-	TextRender()->SetCursor(&Cursor, m_Width-174.0f, m_Height-13.0f, 8.0f, TEXTFLAG_RENDER);
+	TextRender()->SetCursor(&Cursor, m_Width-Width+6.0f, m_Height-13.0f, 8.0f, TEXTFLAG_RENDER);
 
 	str_format(aBuf, sizeof(aBuf), "%s: ", Localize("Spectate"));
 	TextRender()->TextEx(&Cursor, aBuf, -1);
@@ -660,6 +669,40 @@ void CHud::RenderSpectatorHud()
 	TextRender()->TextEx(&Cursor, aBuf, -1);
 }
 
+void CHud::RenderSpectatorNotification()
+{
+	if(m_pClient->m_aClients[m_pClient->m_LocalClientID].m_Team == TEAM_SPECTATORS &&
+		m_pClient->m_TeamChangeTime + 5.0f >= Client()->LocalTime())
+	{
+		// count non spectators
+		int NumPlayers = 0;
+		for(int i = 0; i < MAX_CLIENTS; i++)
+			if(m_pClient->m_aClients[i].m_Active && m_pClient->m_aClients[i].m_Team != TEAM_SPECTATORS)
+				NumPlayers++;
+
+		if(NumPlayers > 0)
+		{
+			const char *pText = Localize("Click on a player or a flag to follow it");
+			float FontSize = 16.0f;
+			float w = TextRender()->TextWidth(0, FontSize, pText, -1);
+			TextRender()->Text(0, 150 * Graphics()->ScreenAspect() + -w / 2, 30, FontSize, pText, -1);
+		}
+	}
+}
+
+void CHud::RenderReadyUpNotification()
+{
+	if(!(m_pClient->m_Snap.m_paPlayerInfos[m_pClient->m_LocalClientID]->m_PlayerFlags&PLAYERFLAG_READY))
+	{
+		char aKey[64], aText[128];
+		m_pClient->m_pBinds->GetKey("ready_change", aKey, sizeof(aKey));
+		str_format(aText, sizeof(aText), Localize("When ready, press <%s>"), aKey);
+		float FontSize = 16.0f;
+		float w = TextRender()->TextWidth(0, FontSize, aText, -1);
+		TextRender()->Text(0, 150 * Graphics()->ScreenAspect() + -w / 2, 30, FontSize, aText, -1);
+	}
+}
+
 void CHud::OnRender()
 {
 	if(!m_pClient->m_Snap.m_pGameData)
@@ -682,6 +725,7 @@ void CHud::OnRender()
 			if(m_pClient->m_Snap.m_SpecInfo.m_SpectatorID != -1)
 				RenderHealthAndAmmo(&m_pClient->m_Snap.m_aCharacters[m_pClient->m_Snap.m_SpecInfo.m_SpectatorID].m_Cur);
 			RenderSpectatorHud();
+			RenderSpectatorNotification();
 		}
 
 		RenderGameTimer();
